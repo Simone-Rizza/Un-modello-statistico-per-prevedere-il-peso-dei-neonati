@@ -1,0 +1,570 @@
+---
+title: "Un Modello Statistico per Prevedere il Peso dei Neonati"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+1) Importo il database con la funzione read.csv
+```{r}
+dati <- read.csv("neonati.csv",
+                 stringsAsFactors = T)
+```
+
+2) Il dataset contiene 2500 nascite ognuna composta da dieci variabili, vediamole
+nel dettaglio:
+* Anni.madre: quantitativa continua, indica gli anni della madre al momento 
+del parto.
+* N.gravidanze: quantitativa discreta, indica eventuali gravidanze avute in 
+precedenza.
+* Fumatrici: categorica binaria, indica se la madre è una fumatrice o meno.
+* Gestazione: quantitativa continua, indica il periodo di gestazione espresso 
+in settimane.
+* Peso: quantitativa continua, indica il peso del neonato espresso in grammi.
+* Lunghezza: quantitativa continua, indica la lunghezza del neonato in mm.
+* Cranio: quantitativa continua, indica il diametro in mm del cranio del neonato.
+* Tipo parto: categorica binaria, parto naturale o cesareo.
+* Ospedale: categorica nominale, indica l'ospedale in cui è avvenuto il parto.
+* Sesso: categorica binaria, indica il sesso del nascituro.
+
+Obiettivo dello studio è quello di usare tutte le variabili in nostro possesso
+per creare un modello in grado di prevedere, indicando specifici parametri, il
+peso di un neonato alla nascita. In particolare si vuole indagare se le
+variabili della madre abbiano un effetto significativo su quelle del nascituro.
+
+3) Indaghiamo brevemente alcune variabili degne di nota, partiamo con gli anni
+della madre:
+```{r}
+library(dplyr)
+library(moments)
+
+attach(dati)
+
+dati %>%
+  summarise(media = mean(Anni.madre),
+            sd = sd(Anni.madre),
+            asimmetria = skewness(Anni.madre),
+            curtosi = kurtosis(Anni.madre)-3)
+```
+L'età media del campione è di 28 anni, con una variazione standard di 5 anni,
+abbiamo una distribuzione leggermente asimmetrica positiva leptocurtica.
+
+
+```{r}
+dati %>%
+  summarise(media = mean(N.gravidanze),
+            sd = sd(N.gravidanze),
+            asimmetria = skewness(N.gravidanze),
+            curtosi = kurtosis(N.gravidanze)-3)
+```
+In media le donne prese in esame hanno  già avuto una gravidanza in precedenza,
+abbiamo una deviazione standard di 1 circa con una distribuzione asimmetrica
+positiva leptocurtica.
+
+
+```{r}
+dati %>%
+  summarise(media = mean(Gestazione),
+            sd = sd(Gestazione),
+            asimmetria = skewness(Gestazione),
+            curtosi = kurtosis(Gestazione)-3)
+```
+Le gravidanze prese in esame hanno una durata di 39 settimane con una deviazione
+standard di 2. Abbiamo una distribuzione asimmetrica negativa leptocurtica.
+
+
+```{r}
+dati %>%
+  summarise(media = mean(Peso),
+            sd = sd(Peso),
+            asimmetria = skewness(Peso),
+            curtosi = kurtosis(Peso)-3)
+```
+I neonati presi in esame hanno un peso medio di 3.3 kg, con una deviazione 
+standard di 525g. Abbiamo una distribuzione asimmetrica negativa leptocurtica.
+
+
+```{r}
+dati %>%
+  summarise(media = mean(Lunghezza),
+            sd = sd(Lunghezza),
+            asimmetria = skewness(Lunghezza),
+            curtosi = kurtosis(Lunghezza)-3)
+```
+I neonati presi in esame sono lunghi in media 495mm con una deviazione standard 
+di 26mm. Abbiamo una distribuzione asimmetrica negativa leptocurtica.
+
+
+```{r}
+dati %>%
+  summarise(media = mean(Cranio),
+            sd = sd(Cranio),
+            asimmetria = skewness(Cranio),
+            curtosi = kurtosis(Cranio)-3)
+```
+Il diametro del cranio del campione preso in esame è di 340mm con una deviazione
+standard di 16.5mm. Abbiamo una distribuzione leggermente asimmetrica negativa
+leptocurtica.
+
+
+Proseguiamo con una rappresentazione grafica per rendere più chiaro a colpo
+d'occhio la composizione del nostro campione.
+
+```{r}
+library(ggplot2)
+df <- data.frame(
+  Sesso = factor(Sesso),
+  Fumatrice = factor(Fumatrici),
+  TipoParto = factor(Tipo.parto),
+  Ospedale = factor(Ospedale)
+)
+
+ggplot(df) +
+  geom_bar(aes(x = factor(1), fill = Sesso),position = "stack", width = 0.8) +
+  geom_bar(aes(x = factor(2), fill = Fumatrice), position = "stack", width = 0.8) +
+  geom_bar(aes(x = factor(3), fill = TipoParto), position = "stack", width = 0.8) +
+  geom_bar(aes(x = factor(4), fill = Ospedale), position = "stack", width = 0.8) +
+  scale_x_discrete(labels = c("Sesso", "Fumatrice", "Tipo Parto", "Ospedale")) +
+  labs(title = "Caratteristiche del campione",
+       x = "Caratteristiche",
+       y = "Nascite") +
+  guides(fill = guide_legend(title = "Legenda"))+
+  theme_minimal()
+```
+Dal grafico notiamo che:
+
+* I neonati di sesso maschile e femminile sono presenti in egual quantità
+all'interno del campione.
+* La maggior parte delle mamme sono non fumatrici (condizione codificata con 0).
+* Poco più dei due terzi dei nascituri sono nati da un parto naturale.
+* Le nascite sono equidistribuite fra i tre ospedali.
+
+
+4) Per saggiare l'ipotesi che la media di peso e lunghezza del nostro campione
+di neonati sia uguale a quello della popolazione eseguiamo uno t test.
+
+Iniziamo con il peso. In media i neonati alla nascita hanno un peso di 3.3kg.
+(FONTE: https://www.ospedalebambinogesu.it/da-0-a-30-giorni-come-si-presenta-e-come-cresce-80012/)
+Avremo quindi un'ipotesi nulla che sosterrà una significativa uguaglianza fra
+le medie, e un'ipotesi alternativa che sosterrà una differenza fra le medie.
+
+Vado quindi ad eseguire il test t:
+```{r}
+t.test(Peso, mu = 3300, conf.level = 0.95, alternative = "two.sided")
+```
+Con un P-value di 0.13 non rifiutiamo l'ipotesi nulla. Le due medie non 
+presentano differenze significative.
+
+
+Passiamo ora alla lunghezza. Sempre secondo secondo la fonte citata in precedenza
+alla nascita i neonati presentano una lunghezza di 50cm. Avremo quindi un'ipotesi 
+nulla che sosterrà una significativa uguaglianza fra le medie, e un'ipotesi 
+alternativa che sosterrà una differenza fra le medie.
+
+Vado quindi ad eseguire il test t:
+```{r}
+t.test(Lunghezza, mu = 500, conf.level = 0.95, alternative = "two.sided")
+```
+Il test restituisce un P-value molto piccolo, suggerendoci quindi di rifiutare
+l'ipotesi nulla in quanto le due medie presentano differenze significative.
+
+NOTA: La differenza di lunghezza fra la media della popolazione e quella del 
+nostro campione è di soli 5mm, non rilevante per lo studio che stiamo effettuando.
+Non rifiutiamo quindi l'ipotesi che la media di peso e di lunghezza del nostro
+campione è significativamente uguale a quella della popolazione.
+
+
+5) Verifichiamo se ci sono differenze significative fra i due sessi. Iniziamo
+con il peso:
+```{r}
+t.test(Peso~Sesso)
+```
+Il test ci restituisce un p-value molto basso, rifiutiamo quindi l'ipotesi nulla
+di uguaglianza delle medie. Notiamo infatti nel nostro campione i neonati maschi
+sono in media più pesanti di 247g rispetto alle femmine.
+
+
+Eseguiamo lo stesso test per la lunghezza:
+```{r}
+t.test(Lunghezza~Sesso)
+```
+Anche in questo caso otteniamo un p-value molto basso e rifiutiamo quindi l'ipotesi
+nulla di uguaglianza fra le medie. I neonati maschi sono lunghi in media 10mm in più 
+rispetto alle femmine.
+
+
+Infine consideriamo la circonferenza del cranio:
+```{r}
+t.test(Cranio~Sesso)
+```
+Anche qui otteniamo un p-value molto piccolo e rifiutiamo l'ipotesi nulla di 
+uguaglianza fra le medie. In media la circonferenza del cranio dei neonati maschi
+è più grande di 5mm rispetto alle femmine.
+
+
+In conclusione possiamo dire che in media i neonati di sesso femminile hanno
+misure più piccole rispetto a quelli di sesso maschile. Notiamo che  il nostro 
+campione differisce dalla popolazione solo per il peso. Di norma infatti la
+differenza di peso fra maschi e femmine è di 150g in più per i primi, mentre nel
+nostro campione abbiamo osservato una differenza di 247g. Per quanto riguarda la 
+lunghezza, nella popolazione non si riscontrano particolari differenze di lunghezza 
+fra maschi e femmine, e nel nostro campione ce ne sono di minime con una differenza
+di 10mm fra maschi e femmine.
+
+
+6) Verifichiamo se c'è un ospedale in cui vengono fatti più parti cesarei.
+Comincio convertendo in variabili numeriche binarie "Nat" e "Ces", d'ora in poi
+0 sarà da intendersi "Naturale" e 1 "Cesareo".
+```{r}
+dati <- dati %>%
+  mutate(Tipo.parto = ifelse(Tipo.parto == "Nat", 0, 1))
+```
+
+Creo poi una tabella di contingenza dove saranno indicati il numero di parti 
+naturali e cesarei per ogni ospedale.
+```{r}
+tabella <- table(Tipo.parto, Ospedale)
+tabella
+```
+Già dalla tabella è possibile notare che le cifre non variano significativamente
+ma continuiamo con la nostra indagine, andiamo ad eseguire un test chi quadrato
+per verificare se c'è qualche associazione fra l'ospedale e il tipo di parto.
+```{r}
+chisq.test(tabella)
+```
+Con un p-value di 0.58 non rifiutiamo l'ipotesi nulla di indipendenza, non c'è
+quindi motivo di pensare che ci sia un ospedale in cui vengano eseguiti
+significativamente più parti cesarei.
+
+
+**ANALISI MULTIDIMENSIONALE**
+
+1) Andiamo ora ad indagare le relazioni fra le variabili del nostro dataset.
+Verifichiamo prima se la nostra variabile risposta peso si distribuisce come una
+normale.
+```{r}
+skewness(Peso)
+kurtosis(Peso)-3
+shapiro.test(Peso)
+```
+Lo Shapiro test ci restituisce un p-value molto basso, rifiutiamo quindi l'ipotesi
+nulla di normalità. Controllando i valori di asimmetria e di curtosi notiamo che
+ci troviamo di fronte ad una distribuzione leggermente asimmetrica negativa leptocurtica.
+Potremmo avere qualche problema in seguito con l'analisi dei residui.
+
+
+Andiamo ora a vedere graficamente la correlazione fra le variabili:
+```{r}
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...)
+{
+    par(usr = c(0, 1, 0, 1))
+    r <- abs(cor(x, y))
+    txt <- format(c(r, 0.123456789), digits = digits)[1]
+    txt <- paste0(prefix, txt)
+    if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+    text(0.5, 0.5, txt, cex = cex.cor * r)
+}
+
+pairs(dati, upper.panel = panel.smooth, lower.panel = panel.cor)
+```
+Dal grafico notiamo che le variabili più correlate alla variabile peso sono
+(in ordine crecente): Gestazione, Cranio e Lunghezza. Notiamo anche una correlazione
+della variabile Lunghezza con le variabili Cranio e Gestazione, cosa che potrebbe
+portare a problemi di multicollinearità ma che indagheremo in seguito.
+
+
+Indaghiamo adesso la correlazione fra Peso e le due variabili qualitative Sesso 
+e Fumatrici. Partiamo con quest'ultima.
+```{r}
+par(mfrow=c(1,2))
+boxplot(Peso)
+boxplot(Peso~Fumatrici)
+```
+```{r}
+t.test(Peso~Fumatrici)
+```
+Sia dai boxplot che dal test T vediamo che non ci sono differenze significative
+di peso fra bambini nati da mamme fumatrici e non. Risultato dato probabilmente 
+dal fatto che le mamme fumatrici hanno smesso di fumare una volta saputo di 
+essere incinte.
+
+
+Passiamo adesso alla variabile Sesso:
+```{r}
+par(mfrow=c(1,2))
+boxplot(Peso)
+boxplot(Peso~Sesso)
+```
+```{r}
+t.test(Peso~Sesso)
+```
+Come osservato già in precedenza nel punto 5 ci sono differenze significative di
+peso fra i due sessi.
+
+Possiamo quindi dire che la variabile Peso è correlata alle variabili:
+Gestazione, Lunghezza, Cranio e Sesso.
+
+
+2) Andiamo a creare il nostro primo modello con all'interno tutte le variabili 
+del database.
+```{r}
+mod1 <- lm(Peso ~. , data = dati)
+summary(mod1)
+```
+Concentriamoci sulle varibili che presentano più asterischi e quindi significatività
+maggiore. Per ogni settimana di gestazione si guadagnano 32.5g, per ogni mm di
+lunghezza 10g e per ogni mm di larghezza del cranio 10.5g. Tenendo fissate le
+altre variabili si rileva un peso medio di 77.5g in più rispetto alle femmine.
+Con un R-quadro aggiustato di quasi 0.73 possiamo considerare mod1 come un buon
+modello, ci sono però margini di miglioramento.
+
+
+3) Perfezioniamo il modello attraverso la procedura Stepwise, in questo caso la
+applichiamo automaticamente attraverso la funzione stepAIC.
+```{r}
+library(MASS)
+stepwise.mod <- stepAIC(mod1,
+                        direction = "both",
+                        k=log(2500))
+```
+Vediamo che sono state eliminate le variabili meno significative: Anni.madre,
+Fumatrici, Tipo.parto, Ospedale. 
+
+Diamo uno sguardo più dettagliato:
+```{r}
+summary(stepwise.mod)
+```
+I coefficienti non hanno subito cambiamenti significativi e
+R-quadro aggiustato è rimasto a 0.72
+
+
+In un'ottica di ulteriore semplificazione proviamo a togliere la variabile meno
+significativa del modello, N.gravidanze.
+```{r}
+mod2 <- update(stepwise.mod, ~. - N.gravidanze)
+summary(mod2)
+```
+Ancora una volta vediamo che i coefficienti non subiscono variazioni significative
+e che il nostro R-quadro aggiustato rimane a 0.72.
+
+
+Andiamo ora a confrontare il modello stepwise con mod2.
+Partiamo con il test anova:
+```{r}
+anova(stepwise.mod, mod2)
+```
+Con un p-value di 0.004 non vediamo un aumento significativo di varianza spiegata
+quando si aggiunge la variabile N.gravidanze al modello.
+
+
+Eseguiamo ora il BIC:
+```{r}
+BIC(stepwise.mod, mod2)
+```
+Visto il valore leggermente inferiore del modello stepwise si potrebbe propendere
+per lui tuttavia, applicando il principio del rasoio di Occam, a parità di
+validità delle soluzioni sceglieremo quella più semplice. Sceglieremo quindi
+mod2 per il numero inferiore di regressori.
+
+
+Infine calcoliamo i vif per verificare l'assenza di multicollinearità fra le variabili 
+del nostro modello.
+```{r}
+library(car)
+vif(mod2)
+```
+Con dei vif inferiori a 5 possiamo dire che non c'è multicollinearità fra le
+variabili.
+
+
+4) Verifichiamo se è possibile considerare interazioni fra i regressori, creiamo
+un terzo modello aggiungendo l'effetto di interazione fra gestazione, lunghezza
+e cranio
+```{r}
+mod3 <- lm(Peso~Gestazione*Lunghezza*Cranio+Sesso)
+summary(mod3)
+```
+Nonostante il nostro R-quadro salga e la significativià sia alta per tutti i
+regressori, notiamo dei coefficienti preoccupanti, scartiamo quindi questo modello.
+
+Proviamo adesso mettendo in interazione Gestazione e Lunghezza:
+```{r}
+mod3 <- lm(Peso~Gestazione*Lunghezza+Cranio+Sesso)
+summary(mod3)
+```
+In questo caso vediamo che la variabile lunghezza perde completamente di
+significatività e anche qui i coefficienti assumono valori strani, scartiamo 
+anche questo caso.
+
+Proviamo adesso con Lunghezza*Cranio:
+```{r}
+mod3 <- lm(Peso~Gestazione+Lunghezza*Cranio+Sesso)
+summary(mod3)
+```
+Ancora peggio rispetto a prima, qui oltre ai coefficienti preoccupanti abbiamo
+anche la completa perdita di significatività di Lunghezza e Cranio.
+
+
+Verifichiamo ora la presenza di effetti non lineari. Eseguiremo la stessa
+operazione su Gestazione, Lunghezza e Cranio.
+```{r}
+mod3 <- update(mod2,~. + I(Gestazione^2))
+summary(mod3)
+```
+Vediamo che il coefficiente di Gestazione viene compromesso e che Gestazione^2
+ha significatività bassissima, scartiamo.
+
+
+```{r}
+mod3 <- update(mod2,~. + I(Lunghezza^2))
+summary(mod3)
+```
+Qui abbiamo un aumento di R-quadro e una significatività molto alta per Lunghezza^2,
+tuttavia il coefficiente di Lunghezza viene totalmente stravolto in negativo,
+scartiamo anche questo.
+
+
+```{r}
+mod3 <- update(mod2,~. + I(Cranio^2))
+summary(mod3)
+```
+In questo caso Cranio^2 ha una significatività molto alta ma i coefficienti di
+Cranio vengono totalmente stravolti, scartiamo anche quest'ultimo.
+
+In conclusione quindi non è possibile considerare interazioni o effetti non
+lineari. Il nostro modello di riferimento rimane quindi mod2.
+
+
+5) Procediamo ora con un analisi dei residui di mod2. Calcoliamo la distanza di
+Cook in modo da vedere se sono presenti valori che potrebbero influenzare il
+nostro modello.
+```{r}
+cook <- cooks.distance(mod2)
+plot(cook)
+```
+```{r}
+max(cook)
+```
+Abbiamo un valore oltre la soglia di avvertimento di 0.5 e pericolosamente vicino
+alla soglia di pericolo 1. Andiamo quindi ad individuarlo per poi eliminarlo
+dal nostro dataset. 
+
+Calcoliamo gli outliers:
+```{r}
+outlierTest(mod2)
+```
+Incrociando il risultato ottenuto con il grafico precedente identifichiamo il
+nostro outlier problematico, l'osservazione 1551. 
+
+Andiamo a creare un nuovo dataset eliminando questa osservazione:
+```{r}
+dati.nuovi <- dati[-1551, ]
+```
+
+Ora che abbiamo eliminato il dato problematico creiamo un nuovo modello basandoci
+sui nuovi dati:
+```{r}
+mod4 <- lm(Peso ~Gestazione+Lunghezza+Cranio+Sesso, dati.nuovi)
+summary(mod4)
+```
+Siamo passati da un R-quadro aggiustato di 0.7257 di mod2 a un 0.7358 di mod4,
+abbiamo guadagnato un po' più di accuratezza e siamo contenti.
+
+Eseguiamo ora i test per verificare la presenza di omoschedasticità fra i 
+resisui, la loro non correlazione e se si distribuiscono secondo una 
+distribuzione normale.
+
+Eseguiamo prima il test di omoschedasticità di Breusch-Pagan:
+```{r}
+library(lmtest)
+bptest(mod4)
+```
+Non rifiutiamo l'ipotesi nulla di omoschedasticità, la varianza è costante.
+
+
+Vediamo ora se i residui sono autocorrelati con il test Darwin-Watson:
+```{r}
+dwtest(mod4)
+```
+Non rifiutiamo l'ipotesi nulla di non autocorrelazione.
+
+
+E infine chiudiamo con uno Shapiro test per verificare se i residui seguono una
+distribuzione normale:
+```{r}
+shapiro.test(residuals(mod4))
+```
+Rifiutiamo l'ipotesi nulla, i residui non sono distribuiti secondo una normale.
+
+
+6) Con un R-quadro aggiustato di 0.73 ci assicura una buona accuratezza delle 
+nostre previsioni. I test eseguiti sui residui dimostrano l'assenza di
+eteroschedasticità e di autocorrelazione e, anche se il nostro Shapiro test è
+fallito, vediamo che il grafico dei residui non si discosta di molto da una normale.
+```{r}
+plot(density(residuals(mod4)))
+```
+Nel complesso quindi possiamo considerare il nostro mod4 come un buon modello
+per fare previsioni.
+
+
+7) Mettiamolo quindi subito alla prova eseguiamo una previsione per calcolare il
+peso di una neonata, la mamma è alla terza gravidanza (ignoreremo questo dato),
+e partorirà alla 39esima settimana. Non abbiamo misure dell'ecografia e quindi
+useremo la media femminile di Lunghezza e Cranio.
+```{r}
+media_lunghezza_f <- round(mean(Lunghezza[Sesso=="F"]))
+media_cranio_f <- round(mean(Cranio[Sesso=="F"]))
+
+nuovi.dati <- data.frame(
+  Gestazione = 39,
+  Lunghezza = media_lunghezza_f,
+  Cranio = media_cranio_f,
+  Sesso = "F"
+)
+predizioni <- predict(mod4, newdata = nuovi.dati)
+predizioni
+```
+Ecco fatto! La neonata dovrebbe pesare 3.172kg, dato che possiamo considerare
+corretto in quanto in linea con la media della popolazione.
+
+
+8) Visualizziamo adesso il modello attraverso qualche rappresentazione grafica.
+Visualizziamo la correlazione fra le settimane di gestazione e il peso:
+```{r}
+library(ggplot2)
+ggplot(dati = dati.nuovi)+
+  geom_point(aes(x=Gestazione,
+                 y=Peso), position = "jitter")+
+  geom_smooth(aes(x=Gestazione,
+                 y=Peso), col = "gold", se = F, method = "lm")
+```
+
+
+Visualizziamo la correlazione fra Lunghezza e Peso:
+```{r}
+ggplot(dati = dati.nuovi)+
+  geom_point(aes(x=Lunghezza,
+                 y=Peso,
+                 col= Sesso), position = "jitter")+
+  geom_smooth(aes(x=Lunghezza,
+                 y=Peso,
+                 col = Sesso), se = F, method = "lm")
+```
+Vediamo che all'aumentare della lunghezza naturalmente aumenta anche il peso,
+con con differenze che si accentuano fra i due sessi verso la fine della
+gravidanza, con i maschi più lunghi e più pesanti.
+
+
+Infine visualizziamo la correlazione fra Cranio e Peso:
+```{r}
+ggplot(dati = dati.nuovi)+
+  geom_point(aes(x=Cranio,
+                 y=Peso,
+                 col= Sesso), position = "jitter")+
+  geom_smooth(aes(x=Cranio,
+                 y=Peso,
+                 col = Sesso), se = F, method = "lm")
+```
+Come per la lunghezza abbiamo valori differenti fra i due sessi, con i maschi
+che presentano un diametro del cranio più grande e un conseguente peso maggiore.
